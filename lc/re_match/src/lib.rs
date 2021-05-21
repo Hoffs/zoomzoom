@@ -3,95 +3,108 @@
 // Given an input string (s) and a pattern (p), implement regular expression matching with support for '.' and '*' where:
 // '.' Matches any single character.
 // '*' Matches zero or more of the preceding element.
-
-#[derive(Debug)]
-struct StarMatch {
+#[derive(Debug, PartialEq, Eq, Clone)]
+struct Match {
     ch: char,
-    is_any: bool,
-    str_p: usize,
-    pt_p: usize,
+    is_seq: bool,
+    i_ptr: usize,
+    extended: usize,
+    p_ptr: usize,
+}
+
+impl Match {
+    fn matches(&self, compare: &char) -> bool {
+        self.ch == '.' || &self.ch == compare
+    }
+
+    fn len(&self) -> usize {
+        if self.is_seq {
+            2
+        } else {
+            1
+        }
+    }
 }
 
 pub fn is_match(input: String, pattern: String) -> bool {
-    let mut str_p = 0; // string pointer
-    let mut pt_p = 0; // pattern pointer
-    let mut star_match: Option<StarMatch> = None; //
+    // idea is to push star matches to stack and then eagerly move to next pattern,
+    // if matching then fails at some point, pop the stack, increase and reset
+    // this way its pretty easy to move back multiple matches
+    // if stack is empty or we can't move forward with last element => return false
+    //
+    // this is not as optimal as dp solution, but it is pretty fun way to implement it
+    let mut backtrack_stack: Vec<Match> = Vec::new();
 
     let input: Vec<_> = input.chars().collect();
     let pattern: Vec<_> = pattern.chars().collect();
 
-    if pattern.len() == 0 {
-        return input.len() == 0;
-    }
+    let mut p_ptr = 0;
+    let mut i_ptr = 0;
 
-    loop {
-        if let Some(in_c) = input.get(str_p) {
-            // if we still have some pattern to read
-            if let Some(pt_c) = pattern.get(pt_p) {
-                if  pt_c == in_c || pt_c == &'.' {
-                    // match direct value
-                    str_p += 1;
-                    pt_p += 1;
-                    continue;
-                } else if pt_c == &'*' {
-                    // we have star in pattern, matches anything any amount of times
-                    // we just mark this position as we can always reset to this
-                    // and increase pattern pointer and try matching whatever comes after star
-                    let prev_c = pattern.get(pt_p - 1).unwrap();
-
-                    star_match = Some(StarMatch{ch: *prev_c, is_any: prev_c == &'.', str_p, pt_p});
-                    pt_p += 1;
-                    continue;
-                } else {
-                    // didnt match anything, check if next symbol is star and skip
-                    if let Some('*') = pattern.get(pt_p + 1) {
-                        pt_p += 2;
-                        continue;
-                    }
-                }
-            }
-
-            if let Some(StarMatch{ch, is_any, str_p: string_pos, pt_p: pattern_pos}) = star_match {
-                // nothing matched, but we have star
-                // reset back to where we encountered star + 1
-                // increase the string position by 1
-                if in_c != &ch && !is_any {
-                    println!("str_p {}, pt_p {}, in_c {}", str_p, pt_p, in_c);
-                    println!("str_p {}, pt_p {}, in_c {}", str_p, pt_p, in_c);
-                    println!("{:#?}", star_match);
-                    println!("false in some");
-                    // star_match = None;
-                    // pt_p += 2;
-                    return false;
-                }
-
-                str_p = string_pos+1;
-                pt_p = pattern_pos+1;
-                star_match = Some(StarMatch{ch, is_any, str_p: string_pos+1, pt_p: pattern_pos});
+    'main: loop {
+        // print!("\nloop with p_ptr {}, i_ptr {}\nbacktrack {:?}\n", p_ptr, i_ptr, backtrack_stack);
+        let mut p_match: Option<_> = None;
+        if let Some(matching_ch) = pattern.get(p_ptr) {
+            if let Some('*') = pattern.get(p_ptr + 1) {
+                let seq_match = Match{ch: *matching_ch, is_seq: true, i_ptr, extended: 0, p_ptr};
+                backtrack_stack.push(seq_match.clone());
+                p_match = Option::Some(seq_match);
             } else {
-                    println!("false in else");
-                return false;
+                p_match = Option::Some(Match{ch: *matching_ch, is_seq: false, i_ptr, extended: 0, p_ptr});
             }
-        } else {
-            break;
         }
+
+        let ch = input.get(i_ptr);
+        if ch == None {
+            if p_ptr == pattern.len() {
+                break;
+            }
+        }
+
+        if let Some(current_match) = p_match {
+            if let Some(ch) = ch {
+                if current_match.matches(ch) {
+                    p_ptr += current_match.len();
+                    i_ptr += 1;
+                    continue;
+                }
+            }
+
+            if current_match.is_seq {
+                // if we skip over it, pop it off from backtrack
+                backtrack_stack.pop();
+                p_ptr += current_match.len();
+                continue;
+            }
+        }
+
+        // println!("trying to backtrack");
+        while let Some(mut last_seq) = backtrack_stack.pop() {
+            // println!("got backtrack to {:?}", last_seq);
+            if let Some(next_ch) = input.get(last_seq.i_ptr + last_seq.extended + 1) {
+                // println!("got backtrack char {}", next_ch);
+                if last_seq.matches(next_ch) {
+                    // we can extend last match by 1
+                    last_seq.extended += 1;
+                    i_ptr = last_seq.i_ptr + last_seq.extended + 1;
+                    p_ptr = last_seq.p_ptr + last_seq.len();
+                    backtrack_stack.push(last_seq);
+                    continue 'main;
+                }
+            }
+
+            // try the case where we skip the match instead
+            i_ptr = last_seq.i_ptr;
+            p_ptr = last_seq.p_ptr + last_seq.len();
+            continue 'main;
+        }
+
+        // nowhere to backtrack to
+        break;
     }
 
-
-    println!("str_p {}, pt_p {}, pattern {:#?}", str_p, pt_p, pattern);
-    // if we ended on star pattern, skip over (e.g. aabb matching with aabb*), since
-    // the rest of the string matched, just it didnt finish on the end of the pattern ("b*")
-    if let Some('*') = pattern.get(pt_p) {
-        pt_p += 1;
-    }
-
-    // "drain" star pattern if we exceed input length
-    while let Some('*') = pattern.get(pt_p + 1) {
-        pt_p += 2;
-    }
-
-
-    str_p == input.len() && pt_p == pattern.len()
+    // print!("\n\ninput {:?}\npattern {:?}\np_ptr {}, i_ptr {}\n", input, pattern, p_ptr, i_ptr);
+    p_ptr == pattern.len() && i_ptr == input.len()
 }
 
 #[cfg(test)]
@@ -102,6 +115,9 @@ mod tests {
         assert!(is_match("abcdf".to_string(), "abcdf".to_string()));
         assert!(!is_match("abcdf".to_string(), "abcd".to_string()));
         assert!(!is_match("abcdf".to_string(), "bcdf".to_string()));
+        assert!(!is_match("abcdf".to_string(), "abcdfeeee".to_string()));
+        assert!(!is_match("abcdf".to_string(), "".to_string()));
+        assert!(!is_match("".to_string(), "aaa".to_string()));
     }
 
     #[test]
@@ -137,7 +153,10 @@ mod tests {
         assert!(is_match("aabb".to_string(), "aabb*".to_string()));
         assert!(is_match("aabb".to_string(), "aabb*z*f*g*.*".to_string()));
         assert!(is_match("mississipi".to_string(), "mis*is*ip*.".to_string()));
-        assert!(is_match("mississippi".to_string(), "mis*is*ip*.".to_string())); // this fails
+        assert!(is_match("mississippi".to_string(), "mis*is*ip*.".to_string()));
         assert!(is_match("miiiiiiiipiiiii".to_string(), "mi*....i*..".to_string()));
+        assert!(!is_match("mississippi".to_string(), "mis*is*p*.".to_string()));
+        assert!(is_match("bbbba".to_string(), ".*a*a".to_string()));
+        assert!(is_match("bbbbaa".to_string(), ".*a*aa".to_string()));
     }
 }
